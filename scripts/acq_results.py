@@ -10,11 +10,12 @@
 # WARRANTIES OF MERCHANTABILITY AND/OR FITNESS FOR A PARTICULAR PURPOSE.
 
 
-import serial_link
-import argparse
-import sys
 import time
-import struct
+
+from sbp.client.main import *
+from sbp.client.handler import *
+from sbp.client.drivers.pyserial_driver import *
+from sbp.client.drivers.pyftdi_driver import *
 
 from numpy           import mean
 from sbp.acquisition import SBP_MSG_ACQ_RESULT
@@ -27,16 +28,14 @@ SNR_THRESHOLD = 25
 
 class AcqResults():
 
-  def __init__(self, link):
+  def __init__(self):
     self.acqs = []
-    self.link = link
-    self.link.add_callback(SBP_MSG_ACQ_RESULT, self._receive_acq_result)
     self.max_corr = 0
 
   def __str__(self):
     tmp = "Last %d acquisitions:\n" % len(self.acqs[-N_PRINT:])
     for a in self.acqs[-N_PRINT:]:
-      tmp += "PRN %2d, SNR: %3.2f\n" % (a['PRN'], a['SNR'])
+      tmp += "PRN %2d, SNR: %3.2f\n" % (a.prn, a.snr)
     tmp += "Max SNR         : %3.2f\n" % (self.max_snr())
     tmp += "Mean of max SNRs: %3.2f\n" % (self.mean_max_snrs(SNR_THRESHOLD))
     return tmp
@@ -44,7 +43,7 @@ class AcqResults():
   # Return the maximum SNR received.
   def max_snr(self):
     try:
-      return max([a['SNR'] for a in self.acqs])
+      return max([a.snr for a in self.acqs])
     except ValueError, KeyError:
       return 0
 
@@ -52,66 +51,61 @@ class AcqResults():
   def mean_max_snrs(self, snr_threshold):
     snrs = []
     # Get the max SNR for each PRN.
-    for prn in set([a['PRN'] for a in self.acqs]):
-      acqs_prn = filter(lambda x: x['PRN'] == prn, self.acqs)
-      acqs_prn_max_snr = max([a['SNR'] for a in acqs_prn])
+    for prn in set([a.prn for a in self.acqs]):
+      acqs_prn = filter(lambda x: x.prn == prn, self.acqs)
+      acqs_prn_max_snr = max([a.snr for a in acqs_prn])
       if acqs_prn_max_snr >= snr_threshold:
-        snrs += [max([a['SNR'] for a in acqs_prn])]
+        snrs += [max([a.snr for a in acqs_prn])]
     if snrs:
       return mean(snrs)
     else:
       return 0
 
-  def _receive_acq_result(self, sbp_msg):
+  def receive_acq_result(self, sbp_msg):
     while N_RECORD > 0 and len(self.acqs) >= N_RECORD:
       self.acqs.pop(0)
+    self.acqs.append(MsgAcqResult(sbp_msg))
 
-    self.acqs.append({})
-    a = self.acqs[-1]
-
-    a['SNR'] = struct.unpack('f', sbp_msg.payload[0:4])[0]  # SNR of best point.
-    a['CP'] = struct.unpack('f', sbp_msg.payload[4:8])[0]   # Code phase of best point.
-    a['CF'] = struct.unpack('f', sbp_msg.payload[8:12])[0]  # Carr freq of best point.
-    a['PRN'] = struct.unpack('B', sbp_msg.payload[12])[0]   # PRN of acq.
-
-if __name__ == "__main__":
+def get_args():
+  """
+  Get and parse arguments.
+  """
+  import argparse
   parser = argparse.ArgumentParser(description='Acquisition Monitor')
   parser.add_argument("-f", "--ftdi",
                       help="use pylibftdi instead of pyserial.",
                       action="store_true")
-  parser.add_argument('-p', '--port',
-                      default=[serial_link.DEFAULT_PORT], nargs=1,
-                      help='specify the serial port to use.')
-  args = parser.parse_args()
-  serial_port = args.port[0]
+  parser.add_argument("-p", "--port",
+                      default=[SERIAL_PORT], nargs=1,
+                      help="specify the serial port to use.")
+  parser.add_argument("-b", "--baud",
+                      default=[SERIAL_BAUD], nargs=1,
+                      help="specify the baud rate to use.")
+  parser.add_argument("-i", "--input-filename",
+                      default=[None], nargs=1,
+                      help="use input file to read SBP messages from.")
+  return parser.parse_args()
 
-  print "Waiting for device to be plugged in ...",
-  sys.stdout.flush()
-  found_device = False
-  while not found_device:
-    try:
-      link = serial_link.SerialLink(serial_port, use_ftdi=args.ftdi)
-      found_device = True
-    except KeyboardInterrupt:
-      # Clean up and exit.
-      link.close()
-      sys.exit()
-    except:
-      # Couldn't find device.
-      time.sleep(0.01)
-  print "link with device successfully created."
-  link.add_callback(SBP_MSG_PRINT, serial_link.default_print_callback)
+def main():
+  """
+  Get configuration, get driver, and build handler and start it.
+  """
+  args = get_args()
+  port = args.port[0]
+  baud = args.baud[0]
+  use_ftdi = args.ftdi
+  input_filename = args.input_filename[0]
+  with get_driver(use_ftdi, input_filename, port, baud) as driver:
+    with Handler(driver.read, driver.write, False) as handler:
+      acq_results = AcqResults()
+      handler.add_callback(print_callback, SBP_MSG_PRINT)
+      handler.add_callback(acq_results.receive_acq_result, SBP_MSG_ACQ_RESULT)
+      try:
+        while True:
+          print acq_results
+          time.sleep(0.1)
+      except KeyboardInterrupt:
+        pass
 
-  acq_results = AcqResults(link)
-
-  # Wait for ctrl+C before exiting.
-  try:
-    while True:
-      print acq_results
-      time.sleep(0.1)
-  except KeyboardInterrupt:
-    pass
-
-  # Clean up and exit.
-  link.close()
-  sys.exit()
+if __name__ == "__main__":
+  main()
