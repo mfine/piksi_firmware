@@ -304,9 +304,9 @@ void system_monitor_setup()
   SETTING("surveyed_position", "surveyed_lon", base_llh[1], TYPE_FLOAT);
   SETTING("surveyed_position", "surveyed_alt", base_llh[2], TYPE_FLOAT);
   SETTING("surveyed_position", "broadcast_ecef", broadcast_surveyed_ecef, TYPE_BOOL);
-  SETTING("surveyed_position", "surveyed_x", base_ecef[0], TYPE_FLOAT);
-  SETTING("surveyed_position", "surveyed_y", base_ecef[1], TYPE_FLOAT);
-  SETTING("surveyed_position", "surveyed_z", base_ecef[2], TYPE_FLOAT);
+  SETTING("surveyed_position", "surveyed_ecef_x", base_ecef[0], TYPE_FLOAT);
+  SETTING("surveyed_position", "surveyed_ecef_y", base_ecef[1], TYPE_FLOAT);
+  SETTING("surveyed_position", "surveyed_ecef_z", base_ecef[2], TYPE_FLOAT);
 
 
   chThdCreateStatic(
