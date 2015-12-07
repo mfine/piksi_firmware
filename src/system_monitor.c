@@ -54,7 +54,9 @@ static Thread *watchdog_thread_handle;
 /* Base station mode settings. */
 /* TODO: Relocate to a different file? */
 static bool_t broadcast_surveyed_position = false;
+static bool_t broadcast_surveyed_ecef = false;
 static double base_llh[3];
+static double base_ecef[3];
 
 /* Global CPU time accumulator, used to measure thread CPU usage. */
 u64 g_ctime = 0;
@@ -169,21 +171,36 @@ static msg_t system_monitor_thread(void *arg)
     sbp_send_msg(SBP_MSG_HEARTBEAT, sizeof(status_flags), (u8 *)&status_flags);
 
     /* If we are in base station mode then broadcast our known location. */
-    if (broadcast_surveyed_position && position_quality == POSITION_FIX) {
-      double tmp[3];
-      double base_ecef[3];
-      double base_distance;
+    if (position_quality == POSITION_FIX) {
+      if (broadcast_surveyed_position) {
+        double tmp[3];
+        double tmp_ecef[3];
+        double base_distance;
 
-      llhdeg2rad(base_llh, tmp);
-      wgsllh2ecef(tmp, base_ecef);
+        llhdeg2rad(base_llh, tmp);
+        wgsllh2ecef(tmp, tmp_ecef);
 
-      vector_subtract(3, base_ecef, position_solution.pos_ecef, tmp);
-      base_distance = vector_norm(3, tmp);
+        vector_subtract(3, tmp_ecef, position_solution.pos_ecef, tmp);
+        base_distance = vector_norm(3, tmp);
 
-      if (base_distance > BASE_STATION_DISTANCE_THRESHOLD) {
-        log_warn("Invalid surveyed position coordinates\n");
-      } else {
-        sbp_send_msg(SBP_MSG_BASE_POS_LLH, sizeof(msg_base_pos_llh_t), (u8 *)&base_llh);
+        if (base_distance > BASE_STATION_DISTANCE_THRESHOLD) {
+          log_warn("Invalid surveyed position coordinates\n");
+        } else {
+          sbp_send_msg(SBP_MSG_BASE_POS_LLH, sizeof(msg_base_pos_llh_t), (u8 *)&base_llh);
+        }
+      }
+      if (broadcast_surveyed_ecef) {
+        double tmp[3];
+        double base_distance;
+
+        vector_subtract(3, base_ecef, position_solution.pos_ecef, tmp);
+        base_distance = vector_norm(3, tmp);
+
+        if (base_distance > BASE_STATION_DISTANCE_THRESHOLD) {
+          log_warn("Invalid surveyed ECEF coordinates\n");
+        } else {
+          sbp_send_msg(SBP_MSG_BASE_POS_ECEF, sizeof(msg_base_pos_ecef_t), (u8 *)&base_ecef);
+        }
       }
     }
 
@@ -286,6 +303,10 @@ void system_monitor_setup()
   SETTING("surveyed_position", "surveyed_lat", base_llh[0], TYPE_FLOAT);
   SETTING("surveyed_position", "surveyed_lon", base_llh[1], TYPE_FLOAT);
   SETTING("surveyed_position", "surveyed_alt", base_llh[2], TYPE_FLOAT);
+  SETTING("surveyed_position", "broadcast_ecef", broadcast_surveyed_ecef, TYPE_BOOL);
+  SETTING("surveyed_position", "surveyed_x", base_ecef[0], TYPE_FLOAT);
+  SETTING("surveyed_position", "surveyed_y", base_ecef[1], TYPE_FLOAT);
+  SETTING("surveyed_position", "surveyed_z", base_ecef[2], TYPE_FLOAT);
 
 
   chThdCreateStatic(
