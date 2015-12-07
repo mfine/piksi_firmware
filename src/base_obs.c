@@ -342,7 +342,7 @@ void base_obs_setup()
 
   static sbp_msg_callbacks_node_t base_pos_node;
   sbp_register_cbk(
-    SBP_MSG_BASE_POS,
+    SBP_MSG_BASE_POS_LLH,
     &base_pos_callback,
     &base_pos_node
   );
